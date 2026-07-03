@@ -1,0 +1,161 @@
+name: Terraform CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # for OIDC-based AWS auth in the plan job
+  security-events: write
+
+env:
+  TF_VERSION: "1.9.5"
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  fmt:
+    name: Format check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform fmt
+        run: terraform fmt -recursive -check -diff
+
+  validate:
+    name: Validate (${{ matrix.dir }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir:
+          - modules/vpc
+          - modules/eks
+          - modules/irsa
+          - modules/observability
+          - environments/dev
+          - environments/prod
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: terraform init (no backend)
+        working-directory: ${{ matrix.dir }}
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        working-directory: ${{ matrix.dir }}
+        run: terraform validate
+
+  tflint:
+    name: TFLint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: terraform-linters/setup-tflint@v4
+        with:
+          tflint_version: v0.53.0
+
+      - name: Cache tflint plugins
+        uses: actions/cache@v4
+        with:
+          path: ~/.tflint.d/plugins
+          key: tflint-${{ hashFiles('.tflint.hcl') }}
+
+      - name: tflint init
+        run: tflint --init
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: tflint
+        run: tflint --recursive --config "$(pwd)/.tflint.hcl" --format compact
+
+  security:
+    name: Security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          soft_fail: false
+
+      - name: checkov
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: .
+          framework: terraform
+          quiet: true
+          output_format: cli
+          soft_fail: false
+
+  plan:
+    name: Plan (${{ matrix.env }})
+    # Plans require read access to real AWS accounts. The job runs only on
+    # pull requests and expects an OIDC deployment role in the AWS_PLAN_ROLE_ARN
+    # repository secret; it is skipped when the secret is absent (e.g., forks).
+    if: github.event_name == 'pull_request'
+    needs: [fmt, validate, tflint]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, prod]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for AWS role secret
+        id: check-role
+        run: |
+          if [ -n "${{ secrets.AWS_PLAN_ROLE_ARN }}" ]; then
+            echo "has_role=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_role=false" >> "$GITHUB_OUTPUT"
+            echo "AWS_PLAN_ROLE_ARN secret not set; skipping plan."
+          fi
+
+      - uses: hashicorp/setup-terraform@v3
+        if: steps.check-role.outputs.has_role == 'true'
+        with:
+          terraform_version: ${{ env.TF_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        if: steps.check-role.outputs.has_role == 'true'
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: terraform init
+        if: steps.check-role.outputs.has_role == 'true'
+        working-directory: environments/${{ matrix.env }}
+        run: terraform init -input=false
+
+      - name: terraform plan
+        if: steps.check-role.outputs.has_role == 'true'
+        working-directory: environments/${{ matrix.env }}
+        run: |
+          terraform plan -input=false -no-color -out=plan.tfplan \
+            | tee plan-output.txt
+          {
+            echo "## Terraform plan — ${{ matrix.env }}"
+            echo '```'
+            tail -n 60 plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          TF_VAR_grafana_admin_password: ${{ secrets.GRAFANA_ADMIN_PASSWORD }}
+          TF_VAR_cluster_endpoint_allowed_cidrs: ${{ vars.CLUSTER_ENDPOINT_ALLOWED_CIDRS }}

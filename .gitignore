@@ -1,0 +1,46 @@
+# Local .terraform directories
+**/.terraform/*
+.terraform/
+
+# Terraform lockfiles are committed intentionally in environments/;
+# uncomment the next line if you prefer not to commit them.
+# .terraform.lock.hcl
+
+# State files — state lives in S3, never in git
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Crash log files
+crash.log
+crash.*.log
+
+# Variable files that may contain secrets or account-specific values
+*.tfvars
+*.tfvars.json
+!*.tfvars.example
+
+# Plan output files
+*.tfplan
+*.plan
+plan.out
+
+# Override files, typically used for local experiments
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# CLI configuration files
+.terraformrc
+terraform.rc
+
+# tfsec / checkov / tflint caches
+.tflint.d/
+.checkov/
+
+# Editor and OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
