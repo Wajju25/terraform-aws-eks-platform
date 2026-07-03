@@ -1,0 +1,20 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored.
+
+project     = "eks-platform"
+owner       = "platform-engineering"
+cost_center = "engineering"
+
+region   = "us-east-1"
+vpc_cidr = "10.0.0.0/16"
+
+cluster_version = "1.30"
+
+# Narrow this to your office or VPN egress ranges.
+cluster_endpoint_allowed_cidrs = ["203.0.113.0/24"]
+
+# Optional in dev — flips on kube-prometheus-stack.
+enable_prometheus_stack = false
+
+# Only needed when enable_prometheus_stack = true.
+# Prefer TF_VAR_grafana_admin_password over committing a value anywhere.
+# grafana_admin_password = "change-me"

@@ -1,0 +1,18 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored.
+
+project     = "eks-platform"
+owner       = "platform-engineering"
+cost_center = "engineering"
+
+region   = "us-east-1"
+vpc_cidr = "10.1.0.0/16"
+
+cluster_version = "1.30"
+
+# Prod refuses 0.0.0.0/0 — list explicit office or VPN egress ranges.
+cluster_endpoint_public_access = true
+cluster_endpoint_allowed_cidrs = ["203.0.113.0/24", "198.51.100.0/24"]
+
+# Required. Prefer TF_VAR_grafana_admin_password or a secrets manager
+# over writing a real value into any file.
+grafana_admin_password = "change-me-before-apply"
